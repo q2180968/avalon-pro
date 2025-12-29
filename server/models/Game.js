@@ -6,6 +6,8 @@ const GameSchema = new mongoose.Schema({
 
   // 游戏结束时间 (如果是补录，这个时间由管理员手动指定)
   endTime: { type: Date, required: true },
+  // 游戏開始時間时间 (如果是补录，这个时间由管理员手动指定)
+  startTime: { type: Date, required: true },
 
   // 是否为补录数据
   isBackfill: { type: Boolean, default: false },
@@ -21,13 +23,8 @@ const GameSchema = new mongoose.Schema({
     role: String,     // e.g. "Merlin", "Assassin"
     isWin: Boolean    // 该玩家这局赢了吗？
   }],
-  firstSpeaker: String, // 新增
-  players: [{
-    nickname: String,
-    role: String,
-    isReady: { type: Boolean, default: false }, // 新增
-    // ...
-  }]
+  firstSpeaker: String// 新增
+
 
 });
 

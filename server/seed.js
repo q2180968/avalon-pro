@@ -2,26 +2,33 @@ const mongoose = require('mongoose');
 const User = require('./models/User');
 const Game = require('./models/Game');
 
-// === 1. 数据库连接配置 ===
 const MONGO_URI = 'mongodb://127.0.0.1:27017/avalon';
 
-// === 2. 真实玩家名单 (来自图片) ===
+// 玩家池 (增加到10人以满足最大局)
 const PLAYER_NAMES = [
     "曹陈铭", "程丽娟", "郭海涛", "李成祥", 
-    "芦伟", "武新颖", "徐强", "张宏涛", "张佳维"
+    "芦伟", "武新颖", "徐强", "张宏涛", "张佳维", "路人甲"
 ];
 
-// === 3. 游戏规则配置 (9人局) ===
-const ROLES_CONFIG = [
-    'Merlin', 'Percival', 'Loyal', 'Loyal', 'Loyal', 'Loyal', // 6个好人
-    'Morgana', 'Assassin', 'Mordred' // 3个坏人
-];
-const GOOD_ROLES = ['Merlin', 'Percival', 'Loyal'];
+const ROLES = {
+    MERLIN: 'Merlin', PERCIVAL: 'Percival', LOYAL: 'Loyal',
+    MORGANA: 'Morgana', ASSASSIN: 'Assassin', MINION: 'Minion',
+    OBERON: 'Oberon', MORDRED: 'Mordred'
+};
+// 复制后端的配置表，确保准确
+const CONFIG = {
+    5: [ROLES.MERLIN, ROLES.PERCIVAL, ROLES.LOYAL, ROLES.MORGANA, ROLES.ASSASSIN],
+    6: [ROLES.MERLIN, ROLES.PERCIVAL, ROLES.LOYAL, ROLES.LOYAL, ROLES.MORGANA, ROLES.ASSASSIN],
+    7: [ROLES.MERLIN, ROLES.PERCIVAL, ROLES.LOYAL, ROLES.LOYAL, ROLES.MORGANA, ROLES.ASSASSIN, ROLES.OBERON],
+    8: [ROLES.MERLIN, ROLES.PERCIVAL, ROLES.LOYAL, ROLES.LOYAL, ROLES.LOYAL, ROLES.MORGANA, ROLES.ASSASSIN, ROLES.MINION],
+    9: [ROLES.MERLIN, ROLES.PERCIVAL, ROLES.LOYAL, ROLES.LOYAL, ROLES.LOYAL, ROLES.LOYAL, ROLES.MORGANA, ROLES.ASSASSIN, ROLES.MORDRED],
+    10: [ROLES.MERLIN, ROLES.PERCIVAL, ROLES.LOYAL, ROLES.LOYAL, ROLES.LOYAL, ROLES.LOYAL, ROLES.MORGANA, ROLES.ASSASSIN, ROLES.MORDRED, ROLES.OBERON]
+};
 
+const GOOD_ROLES = [ROLES.MERLIN, ROLES.PERCIVAL, ROLES.LOYAL];
 const BLUE_REASONS = ['Mission Success', 'Assassination Failed'];
 const RED_REASONS = ['Mission Failed', 'Merlin Assassinated'];
 
-// 辅助：打乱数组
 function shuffle(array) {
     const newArr = [...array];
     for (let i = newArr.length - 1; i > 0; i--) {
@@ -31,124 +38,103 @@ function shuffle(array) {
     return newArr;
 }
 
-// === 主脚本逻辑 ===
 async function seedData() {
     try {
-        console.log('🚀 开始执行历史数据注入脚本...');
+        console.log('🔄 连接数据库...');
         await mongoose.connect(MONGO_URI);
-        console.log('✅ MongoDB 连接成功');
-
-        // --- 第一步：彻底清理旧数据 ---
-        console.log('🗑️  正在清空 Game 和 User 表...');
-        await Game.deleteMany({});
-        await User.deleteMany({});
-        console.log('✨ 旧数据已清空');
-
-        // --- 第二步：创建基础用户 ---
-        console.log('bust 正在创建 9 位玩家账号...');
-        const userMap = {}; // 用于内存中临时记录统计，减少数据库读写
         
+        console.log('🗑️  清理旧数据...');
+        await User.deleteMany({});
+        await Game.deleteMany({});
+
+        // 1. 创建用户
+        console.log('bust 创建用户...');
+        const userMap = {};
         for (const name of PLAYER_NAMES) {
-            // 初始化 User，各项数据归零
             const user = await User.create({
                 nickname: name,
                 stats: { totalGames: 0, wins: 0, roleUsage: {} },
                 lastActiveAt: new Date()
             });
-            // 在内存里也存一份，方便脚本里累加
-            userMap[name] = { 
-                dbId: user._id, 
-                totalGames: 0, 
-                wins: 0, 
-                roleUsage: {} 
-            };
+            userMap[name] = user;
         }
-        console.log('✅ 玩家账号创建完毕');
 
-        // --- 第三步：模拟 12 局历史战绩 ---
-        const TOTAL_GAMES = 12; // 图片里大概记录了12行
-        console.log(`🎲 正在生成 ${TOTAL_GAMES} 局对战记录...`);
+        // 2. 模拟 25 局游戏 (涵盖不同人数)
+        const TOTAL_GAMES = 25;
+        console.log(`🎲 正在生成 ${TOTAL_GAMES} 局混合人数数据...`);
+
+        // 内存统计缓冲
+        const statsBuffer = {}; 
+        PLAYER_NAMES.forEach(n => statsBuffer[n] = { total: 0, wins: 0, roles: {} });
 
         for (let i = 0; i < TOTAL_GAMES; i++) {
-            // 1. 模拟时间：从12天前开始，每天一局
-            const dayOffset = TOTAL_GAMES - i;
+            // 随机人数 5-10
+            const playerCount = Math.floor(Math.random() * 6) + 5; 
+            
+            // 挑选玩家和角色
+            const currentPlayersNames = shuffle(PLAYER_NAMES).slice(0, playerCount);
+            const currentRoles = shuffle(CONFIG[playerCount]);
+
+            // 时间倒推
             const endTime = new Date();
-            endTime.setDate(endTime.getDate() - dayOffset);
-            // 每局时长随机 30-50 分钟
-            const duration = 1000 * 60 * (30 + Math.floor(Math.random() * 20)); 
+            endTime.setDate(endTime.getDate() - (TOTAL_GAMES - i)); 
+            const duration = 1000 * 60 * (20 + Math.floor(Math.random() * 30));
             const startTime = new Date(endTime.getTime() - duration);
 
-            // 2. 分配角色 (打乱)
-            const currentRoles = shuffle(ROLES_CONFIG);
-            // 玩家顺序也打乱一下，模拟随机座位
-            const currentPlayersName = shuffle(PLAYER_NAMES);
-
-            // 3. 随机胜负
-            const isBlueWin = Math.random() > 0.5; // 50% 概率
+            // 胜负
+            const isBlueWin = Math.random() > 0.5;
             const winner = isBlueWin ? 'blue' : 'red';
             const winReason = isBlueWin 
                 ? BLUE_REASONS[Math.floor(Math.random() * BLUE_REASONS.length)]
                 : RED_REASONS[Math.floor(Math.random() * RED_REASONS.length)];
 
-            // 4. 构建本局的 players 数据，并同步更新 User 统计
-            const gamePlayers = [];
+            const gamePlayersData = [];
 
-            for (let j = 0; j < 9; j++) {
-                const pName = currentPlayersName[j];
+            for (let j = 0; j < playerCount; j++) {
+                const pName = currentPlayersNames[j];
                 const pRole = currentRoles[j];
+                const pUser = userMap[pName];
+
                 const isGood = GOOD_ROLES.includes(pRole);
                 const isWin = (isBlueWin && isGood) || (!isBlueWin && !isGood);
 
-                // 记录到 Game 表的数据结构
-                gamePlayers.push({
+                gamePlayersData.push({
+                    user: pUser._id,
                     nickname: pName,
                     role: pRole,
                     isWin: isWin
                 });
 
-                // === 关键：同步更新内存中的 User 统计 ===
-                userMap[pName].totalGames += 1;
-                if (isWin) userMap[pName].wins += 1;
-                userMap[pName].roleUsage[pRole] = (userMap[pName].roleUsage[pRole] || 0) + 1;
+                // 统计
+                statsBuffer[pName].total++;
+                if (isWin) statsBuffer[pName].wins++;
+                statsBuffer[pName].roles[pRole] = (statsBuffer[pName].roles[pRole] || 0) + 1;
             }
 
-            // 5. 写入 Game 表
             await Game.create({
-                roomId: 'OFFICE_HISTORY',
-                hostName: shuffle(PLAYER_NAMES)[0], // 随机房主
-                winner,
-                winReason,
-                startTime,
-                endTime,
-                firstSpeaker: shuffle(PLAYER_NAMES)[0],
-                players: gamePlayers,
-                isBackfill: true
+                roomId: 'HISTORY',
+                hostName: currentPlayersNames[0],
+                firstSpeaker: currentPlayersNames[1],
+                winner, winReason, startTime, endTime,
+                players: gamePlayersData, isBackfill: true
             });
         }
 
-        // --- 第四步：将累计的统计数据一次性写回 User 表 ---
-        console.log('💾 正在同步更新 User 统计数据...');
+        // 3. 更新 User 表
+        console.log('💾 更新用户统计...');
         for (const name of PLAYER_NAMES) {
-            const data = userMap[name];
-            await User.updateOne(
-                { _id: data.dbId },
-                { 
-                    $set: { 
-                        "stats.totalGames": data.totalGames,
-                        "stats.wins": data.wins,
-                        "stats.roleUsage": data.roleUsage
-                    }
-                }
-            );
+            const buf = statsBuffer[name];
+            const user = userMap[name];
+            user.stats.totalGames = buf.total;
+            user.stats.wins = buf.wins;
+            user.stats.roleUsage = buf.roles;
+            await user.save();
         }
 
-        console.log('🎉 脚本执行成功！历史数据已完美注入。');
+        console.log('✅ 数据生成完毕！');
         process.exit(0);
 
-    } catch (err) {
-        console.error('❌ 脚本执行出错:', err);
-        process.exit(1);
-    }
+    } catch (e) { console.error('❌', e); process.exit(1); }
 }
 
 seedData();
